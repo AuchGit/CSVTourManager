@@ -1,0 +1,91 @@
+name: Build & Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release-Version (z.B. v1.2.0)"
+        required: true
+        default: "v1.0.0"
+      draft:
+        description: "Als Draft-Release erstellen?"
+        required: true
+        default: "true"
+        type: choice
+        options:
+          - "true"
+          - "false"
+
+jobs:
+  build-tauri:
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: windows-latest
+            args: ""
+            name: Windows
+          - platform: macos-latest
+            args: "--target universal-apple-darwin"
+            name: macOS (Universal)
+
+    runs-on: ${{ matrix.platform }}
+    name: Build – ${{ matrix.name }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # ── Node.js ──────────────────────────────────────────────────────────
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      # ── Rust ─────────────────────────────────────────────────────────────
+      - name: Install Rust (stable)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          # Für macOS Universal Binary: beide Architekturen einrichten
+          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+
+      - name: Cache Rust build artifacts
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: "./src-tauri -> target"
+
+      # ── macOS-spezifische Abhängigkeiten ─────────────────────────────────
+      - name: Install macOS dependencies
+        if: matrix.platform == 'macos-latest'
+        run: |
+          # Kein Homebrew-Schritt nötig – Tauri-Action bringt alles mit.
+          # Platzhalter falls du später native libs brauchst (z.B. openssl).
+          echo "macOS dependencies ready."
+
+      # ── Frontend ─────────────────────────────────────────────────────────
+      - name: Install frontend dependencies
+        run: npm ci
+
+      # ── Tauri Build & GitHub Release ─────────────────────────────────────
+      - name: Build Tauri app & publish release
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ github.event.inputs.version }}
+          releaseName: "Release ${{ github.event.inputs.version }}"
+          releaseBody: |
+            ## Was ist neu?
+            <!-- Changelog hier einfügen oder automatisch generieren lassen -->
+
+            ## Downloads
+            | Plattform | Datei |
+            |-----------|-------|
+            | Windows   | `.msi` oder `.exe` Installer |
+            | macOS     | `.dmg` (Intel + Apple Silicon) |
+          releaseDraft: ${{ github.event.inputs.draft }}
+          prerelease: false
+          args: ${{ matrix.args }}
