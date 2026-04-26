@@ -1,6 +1,12 @@
 name: Build & Release
 
 on:
+  # Auto-trigger: pushing a `vX.Y.Z` tag (e.g. via release.bat) starts the build.
+  push:
+    tags:
+      - "v*"
+  # Manual trigger: still available from the Actions tab if you want to rebuild
+  # an existing tag or kick off a draft without pushing a new commit.
   workflow_dispatch:
     inputs:
       version:
@@ -80,8 +86,10 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
-          tagName: ${{ github.event.inputs.version }}
-          releaseName: "Release ${{ github.event.inputs.version }}"
+          # Tag-Push: ref_name liefert "vX.Y.Z". Manueller Dispatch:
+          # nutze den Eingabewert aus dem Formular.
+          tagName: ${{ github.event.inputs.version || github.ref_name }}
+          releaseName: "Release ${{ github.event.inputs.version || github.ref_name }}"
           releaseBody: |
             ## Was ist neu?
             <!-- Changelog hier einfügen oder automatisch generieren lassen -->
@@ -93,7 +101,9 @@ jobs:
             | macOS     | `.dmg` (Intel + Apple Silicon) |
 
             Bestehende Installationen aktualisieren sich beim nächsten Start automatisch.
-          releaseDraft: ${{ github.event.inputs.draft }}
+          # Tag-Push: immer als finales Release. Manueller Dispatch:
+          # Eingabewert respektieren (default: draft).
+          releaseDraft: ${{ github.event.inputs.draft || 'false' }}
           prerelease: false
           args: ${{ matrix.args }}
           # Generates and uploads `latest.json` + `.sig` files for the
