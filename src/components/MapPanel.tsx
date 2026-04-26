@@ -5,6 +5,7 @@ import {
   CircleMarker,
   Circle,
   Popup,
+  Tooltip,
   ZoomControl,
   useMap,
 } from 'react-leaflet';
@@ -48,6 +49,12 @@ function fmtDate(d: string) {
     month: '2-digit',
     year: '2-digit',
   });
+}
+
+/** Compact label for the marker connector — DD.MM.YY, locale-independent. */
+function fmtShort(d: string) {
+  const [y, m, day] = d.split('-');
+  return `${day}.${m}.${y.slice(2)}`;
 }
 
 function markerColor(ev: TourEvent, testConflictIds: string[]): string {
@@ -181,6 +188,21 @@ export const MapPanel: React.FC<Props> = ({
                   <div className="popup-badge popup-ok">✓ KEIN KONFLIKT</div>
                 )}
               </Popup>
+              <Tooltip
+                permanent
+                direction="right"
+                offset={[8, 0]}
+                className={`date-tag date-tag-${
+                  testConflictIds.includes(ev.id)
+                    ? 'test'
+                    : ev.status === 'conflict'
+                    ? 'conflict'
+                    : 'ok'
+                }`}
+              >
+                <span className="date-tag-leader" />
+                <span className="date-tag-text">{fmtShort(ev.date)}</span>
+              </Tooltip>
             </CircleMarker>
           );
         })}
@@ -212,6 +234,15 @@ export const MapPanel: React.FC<Props> = ({
               )}
               <div className="popup-badge popup-test">TEST-POSITION</div>
             </Popup>
+            <Tooltip
+              permanent
+              direction="right"
+              offset={[8, 0]}
+              className="date-tag date-tag-test"
+            >
+              <span className="date-tag-leader" />
+              <span className="date-tag-text">{fmtShort(testEvent.date)}</span>
+            </Tooltip>
           </CircleMarker>
         )}
       </MapContainer>

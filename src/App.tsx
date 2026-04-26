@@ -3,6 +3,7 @@ import type { TourEvent, ConflictPair, TestEventState } from './types';
 import { parseCSVFile, parseCSVText } from './utils/csv';
 import { detectConflicts, getTestConflicts } from './utils/conflicts';
 import { geocode } from './utils/geo';
+import { checkForUpdates } from './utils/updater';
 import { useTheme } from './hooks/useTheme';
 import { Sidebar } from './components/Sidebar';
 import { MapPanel } from './components/MapPanel';
@@ -49,6 +50,11 @@ function App() {
     },
     []
   );
+
+  // ── Auto-update check (runs once at startup, no-op outside Tauri) ─────────
+  useEffect(() => {
+    void checkForUpdates();
+  }, []);
 
   // ── "Open With" — runs once on startup when launched via file association ──
   useEffect(() => {

@@ -74,6 +74,11 @@ jobs:
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Updater bundle signing — set these as repo secrets:
+          #   TAURI_SIGNING_PRIVATE_KEY           (contents of ~/.tauri/<app>.key)
+          #   TAURI_SIGNING_PRIVATE_KEY_PASSWORD  (the password you chose, or empty)
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           tagName: ${{ github.event.inputs.version }}
           releaseName: "Release ${{ github.event.inputs.version }}"
@@ -86,6 +91,11 @@ jobs:
             |-----------|-------|
             | Windows   | `.msi` oder `.exe` Installer |
             | macOS     | `.dmg` (Intel + Apple Silicon) |
+
+            Bestehende Installationen aktualisieren sich beim nächsten Start automatisch.
           releaseDraft: ${{ github.event.inputs.draft }}
           prerelease: false
           args: ${{ matrix.args }}
+          # Generates and uploads `latest.json` + `.sig` files for the
+          # auto-updater alongside the platform installers.
+          includeUpdaterJson: true

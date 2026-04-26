@@ -755,3 +755,53 @@ input[type='date']::-webkit-calendar-picker-indicator {
 .popup-ok       { color: var(--ok);   background: rgba(34,  197, 94, 0.12); }
 .popup-conflict { color: var(--crit); background: rgba(239,  68, 68, 0.12); }
 .popup-test     { color: var(--test); background: rgba(245, 158, 11, 0.12); }
+
+/* ── Permanent date tag next to each marker ─────────────────────────────── */
+/* Override Leaflet's default tooltip chrome so it reads as a thin leader
+   line + small label, not a chat bubble. */
+.leaflet-tooltip.date-tag {
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  display: flex;
+  align-items: center;
+  font-family: var(--font-ui);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+/* Hide Leaflet's built-in tooltip arrow — we draw our own leader. */
+.leaflet-tooltip.date-tag::before {
+  display: none !important;
+}
+
+.date-tag-leader {
+  display: inline-block;
+  width: 10px;
+  height: 1px;
+  margin-right: 4px;
+  background: currentColor;
+  opacity: 0.85;
+}
+
+.date-tag-text {
+  background: rgba(7, 9, 12, 0.78);
+  color: inherit;
+  padding: 1px 5px;
+  border-radius: 2px;
+  border: 1px solid currentColor;
+  line-height: 1.3;
+}
+
+[data-theme='light'] .date-tag-text {
+  background: rgba(255, 255, 255, 0.92);
+}
+
+.date-tag-ok       { color: var(--ok); }
+.date-tag-conflict { color: var(--crit); }
+.date-tag-test     { color: var(--test); }
