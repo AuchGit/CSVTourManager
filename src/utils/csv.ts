@@ -24,6 +24,24 @@ function normaliseRow(raw: Record<string, string>): Record<string, string> {
   return out;
 }
 
+// ── Postal code normalisation ─────────────────────────────────────────────────
+/**
+ * Normalise a German postal code that may have come from Excel.
+ *
+ * Excel treats a column of digits as a number and silently strips leading
+ * zeros — so "01067" (Dresden) becomes the number 1067 on save, which
+ * Papa-Parse hands us back as the string "1067". German PLZs are always
+ * 5 digits, so we left-pad any purely-numeric 4-digit value with a zero.
+ *
+ * Non-numeric or already-5-digit values are returned untouched (after a
+ * trim) so we don't mangle anything we don't recognise.
+ */
+function normalizePostalCode(raw: string): string {
+  const s = raw.trim();
+  if (/^\d{4}$/.test(s)) return '0' + s;
+  return s;
+}
+
 // ── Date normalisation ────────────────────────────────────────────────────────
 function normalizeDate(raw: string): string {
   const s = raw.trim();
@@ -77,7 +95,7 @@ export async function parseCSVText(
 
           const dateStr   = normalizeDate(row.date?.trim() ?? '');
           const cityStr   = row.city?.trim();
-          const postalCode = row.postal_code?.trim() ?? '';
+          const postalCode = normalizePostalCode(row.postal_code ?? '');
           if (!dateStr || !cityStr || !postalCode) continue;
           if (isNaN(Date.parse(dateStr))) continue;
 
