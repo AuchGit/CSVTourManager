@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   MapContainer,
   TileLayer,
@@ -7,9 +7,36 @@ import {
   Popup,
   Tooltip,
   ZoomControl,
+  GeoJSON,
   useMap,
 } from 'react-leaflet';
+import type { LatLngBoundsExpression } from 'leaflet';
+import type { GeoJsonObject } from 'geojson';
 import type { TourEvent, Theme, TestEventState } from '../types';
+
+// ── Map view limits ──────────────────────────────────────────────────────────
+// Bounds: Germany (~47°-55°N, 6°-15°E) plus a small margin so the immediate
+// neighbours stay visible. `maxBoundsViscosity: 1.0` turns the edge into a
+// hard wall (no rubber-band drag-back).
+const DE_MAX_BOUNDS: LatLngBoundsExpression = [
+  [46.5, 5.0],   // SW
+  [55.8, 16.0],  // NE
+];
+// At zoom 6 Germany fills the view with just the immediate neighbour
+// countries visible around the edges. Zoom 5 would already show most of
+// Europe, which the user explicitly does not want.
+const DE_MIN_ZOOM = 6;
+
+// Border outline sources, tried in order until one succeeds. The first two
+// are the high/medium resolution variants from `isellsoap/deutschlandGeoJSON`
+// (a well-known German GIS dataset on GitHub). The third is the much coarser
+// `johan/world.geo.json` country file as a last-resort fallback so we still
+// show *something* even if the better sources are unreachable.
+const DE_GEOJSON_URLS = [
+  'https://raw.githubusercontent.com/isellsoap/deutschlandGeoJSON/main/1_deutschland/2_hoch.geo.json',
+  'https://raw.githubusercontent.com/isellsoap/deutschlandGeoJSON/main/1_deutschland/3_mittel.geo.json',
+  'https://raw.githubusercontent.com/johan/world.geo.json/master/countries/DEU.geo.json',
+];
 
 // ── Tile URLs ─────────────────────────────────────────────────────────────────
 const DARK_TILES =
@@ -90,11 +117,39 @@ export const MapPanel: React.FC<Props> = ({
     testEvent.protection_radius_km !== undefined &&
     testEvent.protection_radius_km > 0;
 
+  // Fetch Germany outline once; try sources in order of preference. Silent
+  // failure is fine — the map still works without the highlighted border.
+  const [deOutline, setDeOutline] = useState<GeoJsonObject | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      for (const url of DE_GEOJSON_URLS) {
+        try {
+          const res = await fetch(url);
+          if (!res.ok) continue;
+          const data = (await res.json()) as GeoJsonObject;
+          if (cancelled) return;
+          setDeOutline(data);
+          return; // first successful source wins
+        } catch {
+          // try next
+        }
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  // Outline color: tuned per theme for visibility against the basemap.
+  const borderColor = theme === 'dark' ? '#7dd3fc' : '#0369a1';
+
   return (
     <div className="map-panel">
       <MapContainer
         center={[51.1, 10.4]}
         zoom={6}
+        minZoom={DE_MIN_ZOOM}
+        maxBounds={DE_MAX_BOUNDS}
+        maxBoundsViscosity={1.0}
         style={{ height: '100%', width: '100%' }}
         zoomControl={false}
       >
@@ -106,6 +161,24 @@ export const MapPanel: React.FC<Props> = ({
           subdomains="abcd"
           maxZoom={19}
         />
+
+        {/* Germany outline — non-interactive, fades behind tiles slightly so
+            it never covers a marker. `key` forces a restyle when the theme
+            changes. */}
+        {deOutline && (
+          <GeoJSON
+            key={`de-outline-${theme}`}
+            data={deOutline}
+            interactive={false}
+            style={{
+              color: borderColor,
+              weight: 2,
+              opacity: 0.85,
+              fill: false,
+              dashArray: '4 3',
+            }}
+          />
+        )}
 
         <ZoomControl position="bottomright" />
 
