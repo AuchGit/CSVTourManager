@@ -26,18 +26,25 @@ function normaliseRow(raw: Record<string, string>): Record<string, string> {
 
 // ── Postal code normalisation ─────────────────────────────────────────────────
 /**
- * Normalise a German postal code that may have come from Excel.
+ * Normalise a German postal code that may have come from Excel or a manual
+ * form input.
  *
  * Excel treats a column of digits as a number and silently strips leading
  * zeros — so "01067" (Dresden) becomes the number 1067 on save, which
  * Papa-Parse hands us back as the string "1067". German PLZs are always
- * 5 digits, so we left-pad any purely-numeric 4-digit value with a zero.
+ * 5 digits, so we left-pad any 4-digit value (numeric type *or* string)
+ * with a zero. Surrounding whitespace and an `'` apostrophe-prefix
+ * (Excel's "force-as-text" marker) are stripped first.
  *
- * Non-numeric or already-5-digit values are returned untouched (after a
+ * Non-numeric or already-5-digit values are returned untouched (after the
  * trim) so we don't mangle anything we don't recognise.
  */
-function normalizePostalCode(raw: string): string {
-  const s = raw.trim();
+export function normalizePostalCode(raw: unknown): string {
+  // Accept numbers as well as strings — depending on how the CSV was written
+  // and how the consumer hands it in, we may receive either type.
+  const s = (typeof raw === 'number' ? String(raw) : String(raw ?? ''))
+    .trim()
+    .replace(/^'/, ''); // Excel's text-forcing apostrophe
   if (/^\d{4}$/.test(s)) return '0' + s;
   return s;
 }

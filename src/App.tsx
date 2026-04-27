@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect } from 'react';
 import type { TourEvent, ConflictPair, TestEventState } from './types';
-import { parseCSVFile, parseCSVText } from './utils/csv';
+import { parseCSVFile, parseCSVText, normalizePostalCode } from './utils/csv';
 import { detectConflicts, getTestConflicts } from './utils/conflicts';
 import { geocode } from './utils/geo';
 import { checkForUpdates } from './utils/updater';
@@ -121,7 +121,11 @@ function App() {
       setTestEvent(null);
       setTestConflictIds([]);
 
-      const coords = await geocode(street, postalCode || '', city);
+      // Normalise so a manually-typed 4-digit PLZ (e.g. "1067") becomes
+      // the canonical 5-digit form ("01067") before geocoding — same rule
+      // as the CSV import path.
+      const normalizedPostal = normalizePostalCode(postalCode || '');
+      const coords = await geocode(street, normalizedPostal, city);
       if (!coords) {
         setCheckError(`Ort "${city || postalCode}" konnte nicht gefunden werden.`);
         setIsChecking(false);
