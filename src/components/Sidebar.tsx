@@ -2,6 +2,7 @@ import React from 'react';
 import type { TourEvent, ConflictPair, Theme } from '../types';
 import { ThemeToggle } from './ThemeToggle';
 import { CsvUpload } from './CsvUpload';
+import { FolderBrowser } from './FolderBrowser';
 import { EventList } from './EventList';
 import { ConflictPanel } from './ConflictPanel';
 import { TestEventForm } from './TestEventForm';
@@ -19,6 +20,8 @@ interface Props {
   isChecking: boolean;
   checkError: string | null;
   onFile: (file: File) => void;
+  selectedFilePath: string | null;
+  onPickFile: (path: string, name: string) => void;
   onSelectEvent: (id: string) => void;
   onHighlightConflict: (ids: [string, string]) => void;
   onCheckTest: (
@@ -45,6 +48,8 @@ export const Sidebar: React.FC<Props> = ({
   isChecking,
   checkError,
   onFile,
+  selectedFilePath,
+  onPickFile,
   onSelectEvent,
   onHighlightConflict,
   onCheckTest,
@@ -64,6 +69,14 @@ export const Sidebar: React.FC<Props> = ({
       {/* ── CSV Upload ── */}
       <div className="sidebar-section">
         <CsvUpload onFile={onFile} isLoading={isLoading} loadingMsg={loadingMsg} />
+      </div>
+
+      {/* ── Folder Browser ── */}
+      <div className="sidebar-section">
+        <FolderBrowser
+          selectedPath={selectedFilePath}
+          onPickFile={onPickFile}
+        />
       </div>
 
       {/* ── Stats HUD ── */}

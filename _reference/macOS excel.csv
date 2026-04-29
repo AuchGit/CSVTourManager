@@ -1,0 +1,25 @@
+﻿date;city;postal_code;street;;protection_radius_km;protection_time_months
+14/02/2027;Frankfurt / Oder;15230;;;100;6
+19/02/2027;Gersthofen;86368;;;100;6
+20.02.2027;Braunschweig;30100;;;100;6
+18.03.27;Finsterwalde;3238;;;100;6
+19.03.27;Neuruppin;16816;;;100;6
+20.03.27;Magdeburg;39104;;;100;6
+21.03.27;Chemnitz;9111;;;100;6
+09.04.27;Zwickau;8056;;;100;6
+10.04.27;Annaberg-Buchholz;9456;;;100;6
+30.04.27;Osterode;37520;;;100;6
+01.05.27;Neubrandenburg;17033;;;100;6
+08.05.27;Stade;21682;;;100;6
+09.05.27;Ilsenburg;38871;;;100;6
+06.06.27;Beelitz;14547;;;100;6
+25.06.27;Ahmsen;49774;;;100;6
+26.06.27;Husum;25813;;;100;6
+01.10.27;Essen;45127;;;100;6
+15.10.27;Riesa;1587;;;100;6
+16.10.27;Hartha;4746;;;100;6
+17.10.27;Aue;8280;;;100;6
+20.10.27;Potsdam;14467;;;100;6
+22.10.27;Osterholz-Scharmbeck;27711;;;100;6
+23.10.27;Bad Salzuflen;32105;;;100;6
+06.11.27;Heide;25746;;;100;6

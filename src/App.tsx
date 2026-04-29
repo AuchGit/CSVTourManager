@@ -4,6 +4,7 @@ import { parseCSVFile, parseCSVText, normalizePostalCode } from './utils/csv';
 import { detectConflicts, getTestConflicts } from './utils/conflicts';
 import { geocode } from './utils/geo';
 import { checkForUpdates } from './utils/updater';
+import { ensureCached, pausePrefetch, resumePrefetch } from './utils/csvCache';
 import { useTheme } from './hooks/useTheme';
 import { Sidebar } from './components/Sidebar';
 import { MapPanel } from './components/MapPanel';
@@ -14,6 +15,7 @@ function App() {
   // ── Core data ──────────────────────────────────────────────────────────────
   const [events, setEvents]       = useState<TourEvent[]>([]);
   const [conflicts, setConflicts] = useState<ConflictPair[]>([]);
+  const [selectedFilePath, setSelectedFilePath] = useState<string | null>(null);
 
   // ── UI state ───────────────────────────────────────────────────────────────
   const [selectedId, setSelectedId]   = useState<string | null>(null);
@@ -42,7 +44,10 @@ function App() {
         setConflicts(detected);
       } catch (err) {
         console.error('CSV error:', err);
-        setLoadingMsg('Fehler beim Lesen der Datei.');
+        const detail = err instanceof Error ? err.message : 'Fehler beim Lesen der Datei.';
+        setLoadingMsg(detail);
+        // Keep the message visible long enough for the user to read it.
+        await new Promise(r => setTimeout(r, 6000));
       } finally {
         setIsLoading(false);
         setLoadingMsg('');
@@ -94,6 +99,36 @@ function App() {
       console.error('CSV error:', err);
       setLoadingMsg('Fehler beim Lesen der Datei.');
     } finally {
+      setIsLoading(false);
+      setLoadingMsg('');
+    }
+  }, []);
+
+  // ── Folder-browser file pick (uses cache, pauses prefetcher) ─────────────
+  const handlePickFile = useCallback(async (path: string, name: string) => {
+    setSelectedFilePath(path);
+    setIsLoading(true);
+    setLoadingMsg(`${name} wird geladen…`);
+    setSelectedId(null);
+    setTestEvent(null);
+    setTestConflictIds([]);
+    setCheckError(null);
+
+    pausePrefetch();
+    try {
+      // ensureCached returns immediately when already cached, otherwise
+      // reads + parses the file and stores the result for future clicks.
+      const cached = await ensureCached(path);
+      const { updatedEvents, conflicts: detected } = detectConflicts(cached);
+      setEvents(updatedEvents);
+      setConflicts(detected);
+    } catch (err) {
+      console.error('CSV error:', err);
+      const detail = err instanceof Error ? err.message : 'Fehler beim Lesen der Datei.';
+      setLoadingMsg(detail);
+      await new Promise(r => setTimeout(r, 4000));
+    } finally {
+      resumePrefetch();
       setIsLoading(false);
       setLoadingMsg('');
     }
@@ -171,6 +206,8 @@ function App() {
         isChecking={isChecking}
         checkError={checkError}
         onFile={handleFile}
+        selectedFilePath={selectedFilePath}
+        onPickFile={handlePickFile}
         onSelectEvent={handleSelectEvent}
         onHighlightConflict={handleHighlightConflict}
         onCheckTest={handleCheckTest}

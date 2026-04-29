@@ -1,6 +1,6 @@
 import Papa from 'papaparse';
 import type { TourEvent } from '../types';
-import { geocode } from './geo';
+import { geocodeDetailed } from './geo';
 
 // ── Column-name normalisation ─────────────────────────────────────────────────
 const COL_MAP: Record<string, string> = {
@@ -50,14 +50,54 @@ export function normalizePostalCode(raw: unknown): string {
 }
 
 // ── Date normalisation ────────────────────────────────────────────────────────
+/**
+ * Accepts the date formats Excel may emit on either Windows or macOS:
+ *   dd.mm.yyyy   dd.mm.yy   dd/mm/yyyy   dd/mm/yy   dd-mm-yyyy
+ *   yyyy-mm-dd   yyyy/mm/dd   yyyy.mm.dd
+ *
+ * 2-digit years are expanded with the standard pivot (00–69 ⇒ 2000–2069,
+ * 70–99 ⇒ 1970–1999) — same rule Excel uses internally.
+ *
+ * Returns the canonical ISO form `YYYY-MM-DD`, or '' if the input does not
+ * look like a valid date. Empty return signals the caller to drop the row,
+ * so we never end up displaying a half-parsed value (e.g. `undefined.undefined.04.27`).
+ */
 function normalizeDate(raw: string): string {
   const s = raw.trim();
-  const dot = s.match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})$/);
-  if (dot) return `${dot[3]}-${dot[2].padStart(2, '0')}-${dot[1].padStart(2, '0')}`;
-  const slash = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
-  if (slash) return `${slash[3]}-${slash[2].padStart(2, '0')}-${slash[1].padStart(2, '0')}`;
-  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
-  return s;
+  if (!s) return '';
+
+  const expandYear = (y: string): string => {
+    if (y.length === 4) return y;
+    const n = parseInt(y, 10);
+    return String(n <= 69 ? 2000 + n : 1900 + n);
+  };
+
+  // dd[./-]mm[./-]yy(yy)
+  const dmy = s.match(/^(\d{1,2})[.\/-](\d{1,2})[.\/-](\d{2}|\d{4})$/);
+  if (dmy) {
+    const yyyy = expandYear(dmy[3]);
+    const mm   = dmy[2].padStart(2, '0');
+    const dd   = dmy[1].padStart(2, '0');
+    return isValidYMD(yyyy, mm, dd) ? `${yyyy}-${mm}-${dd}` : '';
+  }
+
+  // yyyy[-./]mm[-./]dd
+  const ymd = s.match(/^(\d{4})[.\/-](\d{1,2})[.\/-](\d{1,2})$/);
+  if (ymd) {
+    const yyyy = ymd[1];
+    const mm   = ymd[2].padStart(2, '0');
+    const dd   = ymd[3].padStart(2, '0');
+    return isValidYMD(yyyy, mm, dd) ? `${yyyy}-${mm}-${dd}` : '';
+  }
+
+  return '';
+}
+
+function isValidYMD(yyyy: string, mm: string, dd: string): boolean {
+  const y = +yyyy, m = +mm, d = +dd;
+  if (m < 1 || m > 12 || d < 1 || d > 31) return false;
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  return dt.getUTCFullYear() === y && dt.getUTCMonth() === m - 1 && dt.getUTCDate() === d;
 }
 
 // ── Encoding-safe file reader (for drag-and-drop / manual upload) ─────────────
@@ -95,16 +135,25 @@ export async function parseCSVText(
       header: true,
       skipEmptyLines: true,
       complete: async ({ data }) => {
-        const events: TourEvent[] = [];
+        // First pass: validate rows synchronously, collect what needs geocoding.
+        type Pending = {
+          dateStr: string;
+          cityStr: string;
+          postalCode: string;
+          street: string | undefined;
+          radius: number;
+          months: number;
+          label: string;
+        };
+        const pending: Pending[] = [];
 
-        for (let i = 0; i < data.length; i++) {
-          const row = normaliseRow(data[i]);
+        for (const raw of data) {
+          const row = normaliseRow(raw);
 
-          const dateStr   = normalizeDate(row.date?.trim() ?? '');
-          const cityStr   = row.city?.trim();
+          const dateStr    = normalizeDate(row.date?.trim() ?? '');
+          const cityStr    = row.city?.trim();
           const postalCode = normalizePostalCode(row.postal_code ?? '');
           if (!dateStr || !cityStr || !postalCode) continue;
-          if (isNaN(Date.parse(dateStr))) continue;
 
           const radius = parseFloat(row.protection_radius_km ?? '');
           const months = parseFloat(row.protection_time_months ?? '');
@@ -114,30 +163,75 @@ export async function parseCSVText(
           const label  = street
             ? `${street}, ${postalCode} ${cityStr}`
             : `${postalCode} ${cityStr}`;
-          onProgress?.(`Geocoding ${i + 1}/${data.length}: ${label}…`);
 
-          const coords = await geocode(street, postalCode, cityStr);
-          if (!coords) {
-            onProgress?.(`Skipped (geocoding failed): ${label}`);
-            continue;
-          }
-
-          events.push({
-            id: crypto.randomUUID(),
-            date: dateStr,
-            city: cityStr,
-            ...(street !== undefined ? { street } : {}),
-            postal_code: postalCode,
-            latitude: coords.lat,
-            longitude: coords.lng,
-            protection_radius_km: radius,
-            protection_time_months: months,
-            status: 'ok',
-            conflictingIds: [],
-          });
+          pending.push({ dateStr, cityStr, postalCode, street, radius, months, label });
         }
 
-        resolve(events);
+        // Second pass: geocode. Throughput is governed by the global
+        // 1-req/sec queue inside geo.ts (Nominatim's public policy), so
+        // running multiple workers here doesn't speed cold lookups but
+        // *does* let cache hits and inflight-dedup return immediately
+        // while a cold lookup is waiting its turn.
+        const CONCURRENCY = 4;
+        const results: (TourEvent | null)[] = new Array(pending.length).fill(null);
+        let nextIdx = 0;
+        let done = 0;
+        let rateLimitedCount = 0;
+        let lastRateLimitReason = '';
+
+        const worker = async () => {
+          while (true) {
+            const i = nextIdx++;
+            if (i >= pending.length) return;
+            const p = pending[i];
+
+            const r = await geocodeDetailed(p.street, p.postalCode, p.cityStr);
+            done++;
+
+            if (r.kind === 'ratelimit') {
+              rateLimitedCount++;
+              lastRateLimitReason = r.reason;
+              onProgress?.(`Rate-Limit (${done}/${pending.length}): ${p.label}`);
+              continue;
+            }
+            if (r.kind === 'notfound') {
+              onProgress?.(`Nicht gefunden (${done}/${pending.length}): ${p.label}`);
+              continue;
+            }
+
+            onProgress?.(`Geocoding ${done}/${pending.length}: ${p.label}…`);
+            results[i] = {
+              id: crypto.randomUUID(),
+              date: p.dateStr,
+              city: p.cityStr,
+              ...(p.street !== undefined ? { street: p.street } : {}),
+              postal_code: p.postalCode,
+              latitude: r.lat,
+              longitude: r.lng,
+              protection_radius_km: p.radius,
+              protection_time_months: p.months,
+              status: 'ok',
+              conflictingIds: [],
+            };
+          }
+        };
+
+        await Promise.all(
+          Array.from({ length: Math.min(CONCURRENCY, pending.length) }, worker)
+        );
+
+        // If most rows failed because of rate-limiting, raise it instead of
+        // silently returning a near-empty list — that's the real cause when
+        // "alles übersprungen" appears in the UI.
+        if (rateLimitedCount > 0 && rateLimitedCount >= pending.length / 2) {
+          reject(new Error(
+            `Geocoding-Server hat zu viele Anfragen abgelehnt (${rateLimitedCount}/${pending.length}). ` +
+            `Bitte ein paar Minuten warten und erneut versuchen. Detail: ${lastRateLimitReason}`
+          ));
+          return;
+        }
+
+        resolve(results.filter((e): e is TourEvent => e !== null));
       },
       error: reject,
     });
