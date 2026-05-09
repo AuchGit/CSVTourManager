@@ -121,6 +121,21 @@ function normalizeDate(raw: string): string {
   let s = raw.trim();
   if (!s) return '';
 
+  // Excel "serial date" numbers — XLSX cells whose number format isn't a
+  // recognised date format come through SheetJS as bare integers like
+  // "46327" (= 2026-10-30). The cell is genuinely a date in Excel; only
+  // the on-disk number-format string is "General" instead of e.g.
+  // "dd.mm.yyyy", which is why `cellDates: true` doesn't catch it.
+  // Range we accept: 1 (1900-01-01) … 2958465 (9999-12-31).
+  // Comma decimals are tolerated for German-locale exports ("46327,5").
+  if (/^\d+(?:[.,]\d+)?$/.test(s)) {
+    const n = parseFloat(s.replace(',', '.'));
+    if (Number.isFinite(n) && n >= 1 && n < 2958466) {
+      const iso = excelSerialToISODate(n);
+      if (iso) return iso;
+    }
+  }
+
   // Strip a trailing time component if present — Excel datetime cells get
   // exported as e.g. "2024-05-15 00:00:00" or "15.05.2024 12:30", which
   // the date-only regexes below would otherwise reject.
@@ -158,6 +173,31 @@ function isValidYMD(yyyy: string, mm: string, dd: string): boolean {
   if (m < 1 || m > 12 || d < 1 || d > 31) return false;
   const dt = new Date(Date.UTC(y, m - 1, d));
   return dt.getUTCFullYear() === y && dt.getUTCMonth() === m - 1 && dt.getUTCDate() === d;
+}
+
+/**
+ * Convert an Excel-serial date number to an ISO `yyyy-mm-dd` string.
+ *
+ * Excel's serial-date system uses 1900-01-01 as day 1 and erroneously
+ * treats 1900 as a leap year (the "Lotus 1-2-3 bug" Excel preserves for
+ * compatibility). Standard correction:
+ *
+ *   serial 1..59  → 1900-01-01..02-28        (no offset)
+ *   serial 60     → fake 1900-02-29; we map it onto Feb 28
+ *   serial 61+    → real Gregorian dates     (offset by -1 day)
+ *
+ * The fractional part of the serial would carry a time-of-day, but we
+ * floor it because the app only ever stores date-precision values.
+ */
+function excelSerialToISODate(serial: number): string {
+  if (!Number.isFinite(serial) || serial < 1 || serial >= 2958466) return '';
+  const offset = serial >= 60 ? Math.floor(serial) - 1 : Math.floor(serial);
+  const d = new Date(Date.UTC(1900, 0, offset));
+  if (!Number.isFinite(d.getTime())) return '';
+  const y = d.getUTCFullYear();
+  const m = String(d.getUTCMonth() + 1).padStart(2, '0');
+  const dd = String(d.getUTCDate()).padStart(2, '0');
+  return `${y}-${m}-${dd}`;
 }
 
 // ── Encoding-safe file reader (for drag-and-drop / manual upload) ─────────────
