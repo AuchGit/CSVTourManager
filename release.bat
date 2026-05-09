@@ -84,11 +84,20 @@ if errorlevel 1 (
 )
 
 REM ── 6. Tag + push ──────────────────────────────────────────────────────────
-git tag !TAG!
+REM `git tag -a` makes an ANNOTATED tag (a real git object with author /
+REM date / message). Lightweight tags (`git tag <name>` without -a) are
+REM intentionally ignored by `git push --follow-tags`, which is the
+REM common reason why "I pushed a release but no workflow ran" — see
+REM https://git-scm.com/docs/git-push#Documentation/git-push.txt---follow-tags
+git tag -a !TAG! -m "Release !TAG!"
 if errorlevel 1 goto :fail
 
-echo [release] pushing commit and tag...
-git push --follow-tags
+echo [release] pushing commit...
+git push
+if errorlevel 1 goto :fail
+
+echo [release] pushing tag !TAG! (this triggers GitHub Actions)...
+git push origin !TAG!
 if errorlevel 1 goto :fail
 
 echo.
