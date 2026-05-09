@@ -68,6 +68,79 @@ const FlyTo: React.FC<FlyToProps> = ({ lat, lng }) => {
   return null;
 };
 
+// ── Auto-fit controller ──────────────────────────────────────────────────────
+/**
+ * On the first 0→N transition (i.e. when a file finishes loading) tighten
+ * the view onto the events. Subsequent edits don't re-fit so the user's
+ * manual pan/zoom is preserved. Loading a different file resets the
+ * transition so the fit fires again.
+ */
+const FitToEvents: React.FC<{ events: TourEvent[] }> = ({ events }) => {
+  const map = useMap();
+  const lastCount = useRef(0);
+
+  useEffect(() => {
+    if (events.length > 0 && lastCount.current === 0) {
+      const points = events.map(
+        e => [e.latitude, e.longitude] as [number, number]
+      );
+      map.fitBounds(points, { padding: [40, 40], maxZoom: 9 });
+    }
+    lastCount.current = events.length;
+  }, [events, map]);
+
+  return null;
+};
+
+/** Fit the map to a pair of events whenever the highlighted pair changes. */
+const FitToPair: React.FC<{
+  events: TourEvent[];
+  highlightedConflictIds: [string, string] | null;
+}> = ({ events, highlightedConflictIds }) => {
+  const map = useMap();
+  useEffect(() => {
+    if (!highlightedConflictIds) return;
+    const [a, b] = highlightedConflictIds.map(id =>
+      events.find(e => e.id === id)
+    );
+    if (!a || !b) return;
+    map.fitBounds(
+      [
+        [a.latitude, a.longitude],
+        [b.latitude, b.longitude],
+      ],
+      { padding: [60, 60], maxZoom: 10, animate: true, duration: 0.6 }
+    );
+  }, [highlightedConflictIds, events, map]);
+  return null;
+};
+
+/**
+ * When the sidebar collapses or expands, the map's container width
+ * changes. Capture the viewport bounds the moment we see a change and,
+ * once the CSS transition has finished, re-fit to the SAME bounds —
+ * keeping whatever the user had on screen visible after the resize.
+ */
+const SidebarResizeSyncer: React.FC<{ sidebarCollapsed: boolean }> = ({
+  sidebarCollapsed,
+}) => {
+  const map = useMap();
+  const prev = useRef(sidebarCollapsed);
+  useEffect(() => {
+    if (prev.current === sidebarCollapsed) return;
+    const bounds = map.getBounds();
+    prev.current = sidebarCollapsed;
+    // Sidebar transition is 200ms; give a small extra cushion before
+    // measuring so Leaflet sees the new container size.
+    const t = setTimeout(() => {
+      map.invalidateSize({ animate: false });
+      map.fitBounds(bounds, { animate: false });
+    }, 230);
+    return () => clearTimeout(t);
+  }, [sidebarCollapsed, map]);
+  return null;
+};
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function fmtDate(d: string) {
   return new Date(d + 'T00:00:00').toLocaleDateString('de-DE', {
@@ -101,6 +174,14 @@ interface Props {
   testEvent: TestEventState | null;
   selectedId: string | null;
   theme: Theme;
+  /** Pair of event IDs to flash when the user clicks a sidebar conflict. */
+  highlightedConflictIds: [string, string] | null;
+  /** True when the sidebar is collapsed — used to keep the visible map
+   *  bounds stable across the toggle animation. */
+  sidebarCollapsed: boolean;
+  /** Click on a marker → notify the parent so it can sync selection
+   *  with the sidebar list (auto-expand + scroll into view). */
+  onSelectEvent: (id: string) => void;
 }
 
 export const MapPanel: React.FC<Props> = ({
@@ -109,7 +190,14 @@ export const MapPanel: React.FC<Props> = ({
   testEvent,
   selectedId,
   theme,
+  highlightedConflictIds,
+  sidebarCollapsed,
+  onSelectEvent,
 }) => {
+  const highlightedSet = React.useMemo(
+    () => new Set(highlightedConflictIds ?? []),
+    [highlightedConflictIds]
+  );
   const selectedEvent = events.find(e => e.id === selectedId) ?? null;
 
   const hasTestCircle =
@@ -145,8 +233,8 @@ export const MapPanel: React.FC<Props> = ({
   return (
     <div className="map-panel">
       <MapContainer
-        center={[51.1, 10.4]}
-        zoom={6}
+        bounds={DE_MAX_BOUNDS}
+        boundsOptions={{ padding: [20, 20] }}
         minZoom={DE_MIN_ZOOM}
         maxBounds={DE_MAX_BOUNDS}
         maxBoundsViscosity={1.0}
@@ -182,6 +270,18 @@ export const MapPanel: React.FC<Props> = ({
 
         <ZoomControl position="bottomright" />
 
+        {/* Fit to event bounds when a file finishes loading */}
+        <FitToEvents events={events} />
+
+        {/* Fit to a clicked conflict pair */}
+        <FitToPair
+          events={events}
+          highlightedConflictIds={highlightedConflictIds}
+        />
+
+        {/* Preserve visible bounds across sidebar collapse/expand */}
+        <SidebarResizeSyncer sidebarCollapsed={sidebarCollapsed} />
+
         {/* Fly to selected event */}
         <FlyTo
           lat={selectedEvent?.latitude ?? null}
@@ -190,9 +290,10 @@ export const MapPanel: React.FC<Props> = ({
 
         {/* ── Existing event protection circles ── */}
         {events.map(ev => {
-          const col        = circleColor(ev, testConflictIds);
-          const isHit      = testConflictIds.includes(ev.id);
-          const isConflict = ev.status === 'conflict';
+          const col           = circleColor(ev, testConflictIds);
+          const isHit         = testConflictIds.includes(ev.id);
+          const isConflict    = ev.status === 'conflict';
+          const isHighlighted = highlightedSet.has(ev.id);
           return (
             <Circle
               key={`r-${ev.id}`}
@@ -201,10 +302,10 @@ export const MapPanel: React.FC<Props> = ({
               pathOptions={{
                 color:       col,
                 fillColor:   col,
-                fillOpacity: isHit ? 0.1 : 0.05,
-                weight:      isHit || isConflict ? 1.5 : 1,
-                dashArray:   isConflict || isHit ? undefined : '6 5',
-                opacity:     isHit ? 0.85 : 0.55,
+                fillOpacity: isHighlighted ? 0.18 : isHit ? 0.1 : 0.05,
+                weight:      isHighlighted ? 3 : isHit || isConflict ? 1.5 : 1,
+                dashArray:   isConflict || isHit || isHighlighted ? undefined : '6 5',
+                opacity:     isHighlighted ? 1 : isHit ? 0.85 : 0.55,
               }}
             />
           );
@@ -228,19 +329,21 @@ export const MapPanel: React.FC<Props> = ({
 
         {/* ── Existing event markers ── */}
         {events.map(ev => {
-          const col        = markerColor(ev, testConflictIds);
-          const isSelected = selectedId === ev.id;
+          const col           = markerColor(ev, testConflictIds);
+          const isSelected    = selectedId === ev.id;
+          const isHighlighted = highlightedSet.has(ev.id);
           return (
             <CircleMarker
               key={`m-${ev.id}`}
               center={[ev.latitude, ev.longitude]}
-              radius={isSelected ? 10 : 7}
+              radius={isHighlighted ? 12 : isSelected ? 10 : 7}
               pathOptions={{
-                color:       col,
+                color:       isHighlighted ? '#ffffff' : col,
                 fillColor:   col,
-                fillOpacity: 0.9,
-                weight:      isSelected ? 3 : 2,
+                fillOpacity: 1,
+                weight:      isHighlighted ? 3 : isSelected ? 3 : 2,
               }}
+              eventHandlers={{ click: () => onSelectEvent(ev.id) }}
             >
               <Popup className="tp-popup">
                 <div className="popup-city">{ev.city}</div>
@@ -255,27 +358,35 @@ export const MapPanel: React.FC<Props> = ({
                   </div>
                 )}
                 {testConflictIds.includes(ev.id) && (
-                  <div className="popup-badge popup-test">⚡ TEST-KONFLIKT</div>
+                  <div className="popup-badge popup-test">⚠ TEST-KONFLIKT</div>
                 )}
                 {ev.status === 'ok' && !testConflictIds.includes(ev.id) && (
                   <div className="popup-badge popup-ok">✓ KEIN KONFLIKT</div>
                 )}
               </Popup>
-              <Tooltip
-                permanent
-                direction="right"
-                offset={[8, 0]}
-                className={`date-tag date-tag-${
-                  testConflictIds.includes(ev.id)
-                    ? 'test'
-                    : ev.status === 'conflict'
-                    ? 'conflict'
-                    : 'ok'
-                }`}
-              >
-                <span className="date-tag-leader" />
-                <span className="date-tag-text">{fmtShort(ev.date)}</span>
-              </Tooltip>
+              {(() => {
+                const tagStatus = testConflictIds.includes(ev.id)
+                  ? 'test'
+                  : ev.status === 'conflict'
+                  ? 'conflict'
+                  : 'ok';
+                // Leaflet bakes the tooltip className at creation time and
+                // doesn't update it when the prop changes. Keying by status
+                // forces a remount so a slider-driven status flip recolours
+                // the date label live.
+                return (
+                  <Tooltip
+                    key={`tt-${ev.id}-${tagStatus}`}
+                    permanent
+                    direction="right"
+                    offset={[8, 0]}
+                    className={`date-tag date-tag-${tagStatus}`}
+                  >
+                    <span className="date-tag-leader" />
+                    <span className="date-tag-text">{fmtShort(ev.date)}</span>
+                  </Tooltip>
+                );
+              })()}
             </CircleMarker>
           );
         })}

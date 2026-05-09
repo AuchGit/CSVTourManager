@@ -184,45 +184,25 @@ async function runGeocode(query: string): Promise<GeoResult> {
 }
 
 /**
- * Build a deterministic Nominatim query string using the unified rules:
- *   - If street is present → "street, postalCode, city"
- *   - If street is absent  → "postalCode, city"
- *
- * "Germany" is always appended to constrain results.
+ * Build a deterministic Nominatim query string. "Germany" is always
+ * appended to constrain results.
  */
-function buildQuery(
-  street: string | undefined,
-  postalCode: string,
-  city: string
-): string {
-  const parts: string[] = [];
-
-  if (street && street.trim() !== '') {
-    parts.push(street.trim());
-  }
-
-  parts.push(postalCode.trim(), city.trim(), 'Germany');
-
-  return parts.join(', ');
+function buildQuery(postalCode: string, city: string): string {
+  return [postalCode.trim(), city.trim(), 'Germany'].join(', ');
 }
 
 /**
- * Geocode a location via OpenStreetMap Nominatim.
- *
- * Resolution rules (single source of truth):
- *   - street present → street + postalCode + city  (street-level precision)
- *   - street absent  → postalCode + city            (city-level precision)
+ * Geocode a postal-code + city pair via OpenStreetMap Nominatim.
  *
  * Results are cached in-memory by query string to avoid redundant requests.
  * Returns a structured GeoResult so callers can distinguish "not found"
  * from a transient rate-limit / network failure.
  */
 export async function geocodeDetailed(
-  street: string | undefined,
   postalCode: string,
   city: string
 ): Promise<GeoResult> {
-  const q = buildQuery(street, postalCode, city);
+  const q = buildQuery(postalCode, city);
 
   const cached = geocodeCache.get(q);
   if (cached) return { kind: 'ok', lat: cached.lat, lng: cached.lng };
@@ -247,10 +227,9 @@ export async function geocodeDetailed(
  * "not found" from a rate-limit so they can surface a meaningful error.
  */
 export async function geocode(
-  street: string | undefined,
   postalCode: string,
   city: string
 ): Promise<{ lat: number; lng: number } | null> {
-  const r = await geocodeDetailed(street, postalCode, city);
+  const r = await geocodeDetailed(postalCode, city);
   return r.kind === 'ok' ? { lat: r.lat, lng: r.lng } : null;
 }
